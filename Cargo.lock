@@ -1651,6 +1651,7 @@ name = "webappfirewall"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "percent-encoding",
  "reqwest",
  "tokio",
 ]

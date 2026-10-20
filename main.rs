@@ -1,3 +1,4 @@
+mod normalization;
 mod proxy;
 
 #[cfg(test)]
