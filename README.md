@@ -18,7 +18,7 @@ Hoy el proxy solo reenvía el tráfico tal cual (fase 1). El resto de capas se v
 |------|-------------|--------|
 | 0 | Preparación (Rust, conceptos, backend de prueba) | ✅ |
 | 1 | Proxy transparente (reenvía método, path, query, headers y body) | ✅ |
-| 2 | Normalización (doble-encoding, minúsculas, null bytes, `//`, `..\`, comentarios SQL) | ⬜ |
+| 2 | Normalización (doble-encoding, minúsculas, null bytes, `//`, `..\`, comentarios SQL) | ✅ |
 | 3 | Motor de reglas (`trait Detector`, `Match { rule_id, score, location }`) | ⬜ |
 | 4 | Detectores (path traversal/LFI, SQLi, XSS) | ⬜ |
 | 5 | Rate limiting (token bucket por IP) y bots (User-Agent, 404 seguidos) | ⬜ |
