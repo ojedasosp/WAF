@@ -6,7 +6,8 @@ edition = "2024"
 [dependencies]
 axum = "=0.8.9"
 percent-encoding = "2.3.2"
-reqwest = { version = "0.13.5", features = ["stream"] }
+reqwest = { version = "0.13.5", features = ["stream", "json"] }
+serde_json = "1"
 tokio = { version = "1.53.3", features = ["full"] }
 
 [[bin]]

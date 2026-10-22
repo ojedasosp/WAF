@@ -1,3 +1,4 @@
+mod jev;
 mod normalization;
 mod proxy;
 
@@ -17,6 +18,6 @@ async fn main() {
     let app = Router::new()
         .fallback(proxy::handler)
         .with_state((client, UPSTREAM.to_string()));
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8081").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

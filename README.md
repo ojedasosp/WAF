@@ -41,7 +41,7 @@ Para probarlo localmente:
    python3 -m http.server 9000
    ```
 
-2. Corre el WAF (escucha en `0.0.0.0:8080`, upstream `http://127.0.0.1:9000`):
+2. Corre el WAF (escucha en `0.0.0.0:8081`, upstream `http://127.0.0.1:9000`):
 
    ```sh
    cargo run
@@ -50,7 +50,7 @@ Para probarlo localmente:
 3. Verifica que el tráfico pasa intacto:
 
    ```sh
-   curl -v http://127.0.0.1:8080/
+   curl -v http://127.0.0.1:8081/
    ```
 
 Si el upstream no responde, el WAF devuelve `502 Bad Gateway`.
@@ -70,8 +70,9 @@ Los tests de integración (`tests.rs`) levantan un stub upstream en un puerto li
 ## Estructura
 
 ```
-main.rs    servidor axum en :8080, fallback a proxy::handler
+main.rs    servidor axum en :8081, fallback a proxy::handler
 proxy.rs   handler del proxy: reenvía la petición al upstream y devuelve la respuesta
+jev.rs     cliente Jev (respuestas tipadas): state, preguntas y veredicto detect-only (activa con JEV_API_KEY)
 tests.rs   tests de integración contra un stub upstream
 CHECKLIST.md  plan de trabajo por fases
 ```
