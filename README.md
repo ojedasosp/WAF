@@ -10,7 +10,7 @@ cliente → [Rate limiter] → [Normalizador] → [Motor de reglas] → [Decisi�
                                                               403 + log de auditoría
 ```
 
-Hoy el proxy solo reenvía el tráfico tal cual (fase 1). El resto de capas se va sumando sobre ese mismo pipeline.
+Hoy el proxy reenvía el tráfico tal cual y, con `JEV_API_KEY`, pregunta a Jev y loguea el veredicto (detect-only). El resto de capas se va sumando sobre ese mismo pipeline. Ver `PLAN.md`.
 
 ## Estado actual
 
@@ -19,8 +19,9 @@ Hoy el proxy solo reenvía el tráfico tal cual (fase 1). El resto de capas se v
 | 0 | Preparación (Rust, conceptos, backend de prueba) | ✅ |
 | 1 | Proxy transparente (reenvía método, path, query, headers y body) | ✅ |
 | 2 | Normalización (doble-encoding, minúsculas, null bytes, `//`, `..\`, comentarios SQL) | ✅ |
-| 3 | Motor de reglas (`trait Detector`, `Match { rule_id, score, location }`) | ⬜ |
-| 4 | Detectores (path traversal/LFI, SQLi, XSS) | ⬜ |
+| 2.5 | Cliente Jev detect-only (`jev.rs`, `playground.html`) | ✅ |
+| 3 | Inspección completa vía Jev (body bufferizado, timeout, fail-open) | ⬜ |
+| 4 | Decisión (`trait Detector`, umbral, 403 + log de auditoría) | ⬜ |
 | 5 | Rate limiting (token bucket por IP) y bots (User-Agent, 404 seguidos) | ⬜ |
 | 6 | Configuración (`waf.toml`, CLI, modos `detect-only`/`block`/anomaly score) | ⬜ |
 | 7 | Logging y auditoría (`tracing` JSON, log por bloqueo) | ⬜ |
@@ -29,7 +30,7 @@ Hoy el proxy solo reenvía el tráfico tal cual (fase 1). El resto de capas se v
 
 ## Stack
 
-Por ahora: `tokio`, `axum` y `reqwest`. El checklist planea sumar `regex`, `percent-encoding`, `serde` + `toml`, `tracing`, `dashmap` y `clap`; y `criterion` para benchmarks.
+Por ahora: `tokio`, `axum`, `reqwest`, `serde_json` y `percent-encoding`. El checklist planea sumar `regex`, `toml`, `tracing`, `dashmap` y `clap`; y `criterion` para benchmarks.
 
 ## Uso
 
@@ -74,5 +75,6 @@ main.rs    servidor axum en :8081, fallback a proxy::handler
 proxy.rs   handler del proxy: reenvía la petición al upstream y devuelve la respuesta
 jev.rs     cliente Jev (respuestas tipadas): state, preguntas y veredicto detect-only (activa con JEV_API_KEY)
 tests.rs   tests de integración contra un stub upstream
-CHECKLIST.md  plan de trabajo por fases
+PLAN.md      plan de diseño (Jev como motor de detección)
+CHECKLIST.md checklist de trabajo por fases
 ```
