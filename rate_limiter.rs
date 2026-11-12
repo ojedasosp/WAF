@@ -1,15 +1,18 @@
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter, middleware::NoOpMiddleware};
 use nonzero_macros::nonzero;
-use std::net::IpAddr;
+use std::{net::IpAddr, sync::Arc};
 
+type Key = IpAddr;
+
+#[derive(Clone)]
 pub struct Limiter {
-    inner: DefaultKeyedRateLimiter<IpAddr, NoOpMiddleware>,
+    inner: Arc<DefaultKeyedRateLimiter<Key, NoOpMiddleware>>,
 }
 
 impl Limiter {
     pub fn new() -> Limiter {
         Limiter {
-            inner: RateLimiter::keyed(Quota::per_second(nonzero!(50u32))),
+            inner: Arc::new(RateLimiter::keyed(Quota::per_second(nonzero!(50u32)))),
         }
     }
 

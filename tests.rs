@@ -1,11 +1,16 @@
-use super::proxy::handler;
+use super::{proxy::handler, rate_limiter::Limiter};
 use axum::{
     Router,
     body::{Body, to_bytes},
-    extract::{Request, State},
+    extract::{ConnectInfo, Request, State},
     routing::{get, post},
 };
 use reqwest::StatusCode;
+use std::net::SocketAddr;
+
+fn peer() -> ConnectInfo<SocketAddr> {
+    ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345)))
+}
 
 // Stub upstream: one route with a fixed body + header, one that echoes the body.
 async fn hello() -> impl axum::response::IntoResponse {
@@ -41,7 +46,8 @@ async fn forwards_get_status_headers_and_body() {
     let upstream = start_stub_upstream().await;
     let client = reqwest::Client::new();
     let res = handler(
-        State((client, upstream)),
+        State((client, upstream, Limiter::new())),
+        peer(),
         request(axum::http::Method::GET, "/hello", vec![]),
     )
     .await
@@ -60,7 +66,8 @@ async fn forwards_post_body() {
     let upstream = start_stub_upstream().await;
     let client = reqwest::Client::new();
     let res = handler(
-        State((client, upstream)),
+        State((client, upstream, Limiter::new())),
+        peer(),
         request(axum::http::Method::POST, "/echo", b"hello world".to_vec()),
     )
     .await
@@ -70,10 +77,47 @@ async fn forwards_post_body() {
 }
 
 #[tokio::test]
+async fn rate_limited_gives_429() {
+    let upstream = start_stub_upstream().await;
+    let client = reqwest::Client::new();
+    let limiter = Limiter::new();
+    for _ in 0..50 {
+        handler(
+            State((client.clone(), upstream.clone(), limiter.clone())),
+            peer(),
+            request(axum::http::Method::GET, "/hello", vec![]),
+        )
+        .await
+        .unwrap();
+    }
+    let res = handler(
+        State((client, upstream, limiter)),
+        peer(),
+        request(axum::http::Method::GET, "/hello", vec![]),
+    )
+    .await;
+    assert_eq!(res.unwrap_err(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn oversized_body_gives_413() {
+    let upstream = start_stub_upstream().await;
+    let client = reqwest::Client::new();
+    let res = handler(
+        State((client, upstream, Limiter::new())),
+        peer(),
+        request(axum::http::Method::POST, "/echo", vec![b'a'; (1 << 20) + 1]),
+    )
+    .await;
+    assert_eq!(res.unwrap_err(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
 async fn upstream_down_gives_502() {
     let client = reqwest::Client::new();
     let res = handler(
-        State((client, "http://127.0.0.1:1".to_string())),
+        State((client, "http://127.0.0.1:1".to_string(), Limiter::new())),
+        peer(),
         request(axum::http::Method::GET, "/hello", vec![]),
     )
     .await;

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use axum::http::HeaderMap;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const JEV_URL: &str = "https://jev-api.com/v1/systemone";
 const MODEL: &str = "jev-latest";
@@ -27,10 +27,20 @@ pub const QUESTIONS: &str = r#"{
 }"#;
 
 /// State del request con la misma forma que stateFor() del playground
-pub fn state(method: &str, path: &str, query: &str, headers: &HeaderMap, body: Option<&str>) -> Value {
+pub fn state(
+    method: &str,
+    path: &str,
+    query: &str,
+    headers: &HeaderMap,
+    body: Option<&str>,
+) -> Value {
     let h: serde_json::Map<String, Value> = headers
         .iter()
-        .filter_map(|(k, v)| v.to_str().ok().map(|s| (k.as_str().to_string(), Value::String(s.to_string()))))
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|s| (k.as_str().to_string(), Value::String(s.to_string())))
+        })
         .collect();
     json!({ "method": method, "path": path, "query": query, "headers": h, "body": body })
 }
@@ -46,14 +56,15 @@ pub async fn ask(client: &reqwest::Client, key: &str, st: &Value) -> Result<Valu
         .post(JEV_URL)
         .header("Authorization", format!("Bearer {key}"))
         .json(&payload)
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(10))
         .send()
         .await
         .map_err(|e| e.to_string())?;
     let status = res.status();
     let j: Value = res.json().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
-        let msg = j.pointer("/error/message")
+        let msg = j
+            .pointer("/error/message")
             .and_then(Value::as_str)
             .unwrap_or_else(|| status.as_str())
             .to_string();
@@ -65,7 +76,10 @@ pub async fn ask(client: &reqwest::Client, key: &str, st: &Value) -> Result<Valu
 /// Veredicto de una línea para logging detect-only
 pub fn verdict(j: &Value) -> String {
     let a = j.pointer("/answers").unwrap_or(&Value::Null);
-    let atk = a.pointer("/attack_type/choice").and_then(Value::as_str).unwrap_or("?");
+    let atk = a
+        .pointer("/attack_type/choice")
+        .and_then(Value::as_str)
+        .unwrap_or("?");
     let mal = a.pointer("/is_malicious/noul").and_then(Value::as_f64);
     let lvl = a.pointer("/threat_level/score").and_then(Value::as_u64);
     format!("attack_type={atk} is_malicious={mal:?} threat_level={lvl:?}")
@@ -81,10 +95,13 @@ mod tests {
             r#"{"model":"jev-latest","answers":{
               "attack_type":{"type":"choice","choice":"xss","confidence":0.95,"probabilities":{}},
               "is_malicious":{"type":"noul","noul":0.9},
-              "threat_level":{"type":"score","score":2,"legend":{},"probabilities":{}}}}"#
+              "threat_level":{"type":"score","score":2,"legend":{},"probabilities":{}}}}"#,
         )
         .unwrap();
-        assert_eq!(verdict(&j), "attack_type=xss is_malicious=Some(0.9) threat_level=Some(2)");
+        assert_eq!(
+            verdict(&j),
+            "attack_type=xss is_malicious=Some(0.9) threat_level=Some(2)"
+        );
     }
 
     #[test]

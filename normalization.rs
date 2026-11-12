@@ -1,12 +1,12 @@
 use percent_encoding::percent_decode;
 
-fn decoder(input: String) -> String {
-    let mut current = input;
+fn decoder(input: &str) -> String {
+    let mut current = input.to_string();
     // shortcut: 10 decode passes, raise if a bypass needs deeper encoding
     for _ in 0..10 {
         let decoded = percent_decode(current.as_bytes())
             .decode_utf8_lossy()
-            .to_string();
+            .into_owned();
         if decoded == current {
             break;
         }
@@ -17,8 +17,7 @@ fn decoder(input: String) -> String {
     current
 }
 
-#[allow(dead_code)]
-pub fn normalize(path: String) -> String {
+pub fn normalize(path: &str) -> String {
     let mut decoded = decoder(path);
     decoded = decoded.to_lowercase();
     decoded = decoded.trim().to_string();
@@ -44,7 +43,7 @@ mod tests {
     #[test]
     fn deeply_encoded_percent_stops_at_the_cap() {
         // 12 levels of %-encoding; the cap is 10 passes, so 2 levels remain
-        assert_eq!(normalize(format!("%25{}", "25".repeat(11))), "%2525");
+        assert_eq!(normalize(&format!("%25{}", "25".repeat(11))), "%2525");
     }
 
     #[test]
