@@ -1,60 +1,60 @@
 # webappfirewall
 
-Un WAF (Web Application Firewall) en Rust, montado como proxy inverso transparente. Lo estoy armando para portafolio/tesis: la meta es detectar SQLi, XSS y path traversal/LFI, y aplicar rate limiting y detección de bots.
+A WAF (Web Application Firewall) in Rust, set up as a transparent reverse proxy. I'm building it for my portfolio/thesis: the goal is to detect SQLi, XSS and path traversal/LFI, and to apply rate limiting and bot detection.
 
-## Arquitectura
+## Architecture
 
 ```
-cliente → [Rate limiter] → [Normalizador] → [Motor de reglas] → [Decisión] → backend
-                                                                    ↓ bloquear
-                                                              403 + log de auditoría
+client → [Rate limiter] → [Normalizer] → [Rule engine] → [Decision] → backend
+                                                          ↓ block
+                                                    403 + audit log
 ```
 
-Hoy el proxy reenvía el tráfico tal cual y, con `JEV_API_KEY`, pregunta a Jev y loguea el veredicto (detect-only). El resto de capas se va sumando sobre ese mismo pipeline. Ver `PLAN.md`.
+What the proxy does today: it limits each IP to 50 requests/second (`429`), buffers the body with a 1 MiB cap (`413`) and, if `JEV_API_KEY` is in the environment, asks Jev and logs the verdict (detect-only). The remaining layers get added on top of the same pipeline. See `PLAN.md`.
 
-## Estado actual
+## Current status
 
-| Fase | Descripción | Estado |
+| Phase | Description | Status |
 |------|-------------|--------|
-| 0 | Preparación (Rust, conceptos, backend de prueba) | ✅ |
-| 1 | Proxy transparente (reenvía método, path, query, headers y body) | ✅ |
-| 2 | Normalización (doble-encoding, minúsculas, null bytes, `//`, `..\`, comentarios SQL) | ✅ |
-| 2.5 | Cliente Jev detect-only (`jev.rs`, `playground.html`) | ✅ |
-| 3 | Inspección completa vía Jev (body bufferizado, timeout, fail-open) | ⬜ |
-| 4 | Decisión (`trait Detector`, umbral, 403 + log de auditoría) | ⬜ |
-| 5 | Rate limiting (token bucket por IP) y bots (User-Agent, 404 seguidos) | ⬜ |
-| 6 | Configuración (`waf.toml`, CLI, modos `detect-only`/`block`/anomaly score) | ⬜ |
-| 7 | Logging y auditoría (`tracing` JSON, log por bloqueo) | ⬜ |
-| 8 | Evaluación (corpus de payloads, % detección, falsos positivos, benchmark) | ⬜ |
-| 9 | Demo y documentación (docker-compose, sqlmap/nikto local, tests de integración) | ⬜ |
+| 0 | Setup (Rust, concepts, test backend) | ✅ |
+| 1 | Transparent proxy (forwards method, path, query, headers and body) | ✅ |
+| 2 | Normalization (double-encoding, lowercase, null bytes, `//`, `..\`, SQL comments) | ✅ |
+| 2.5 | Jev client detect-only (`jev.rs`, `playground.html`) | ✅ |
+| 3 | Full inspection via Jev (buffered body, timeout, fail-open) | ✅ |
+| 4 | Decision (`trait Detector`, threshold, 403 + audit log) | ⬜ |
+| 5 | Rate limiting (token bucket per IP, `429`) and bots (User-Agent, consecutive 404s) | ◐ |
+| 6 | Configuration (`waf.toml`, CLI, `detect-only`/`block`/anomaly score modes) | ⬜ |
+| 7 | Logging and audit (`tracing` JSON, log per block) | ⬜ |
+| 8 | Evaluation (payload corpus, detection %, false positives, benchmark) | ⬜ |
+| 9 | Demo and documentation (docker-compose, local sqlmap/nikto, integration tests) | ⬜ |
 
 ## Stack
 
-Por ahora: `tokio`, `axum`, `reqwest`, `serde_json` y `percent-encoding`. El checklist planea sumar `regex`, `toml`, `tracing`, `dashmap` y `clap`; y `criterion` para benchmarks.
+What I'm using so far: `tokio`, `axum`, `reqwest`, `serde_json`, `percent-encoding` and `governor` for the token bucket per IP. The checklist plans to add `regex`, `toml`, `tracing` and `clap`, plus `criterion` for benchmarks.
 
-## Uso
+## Usage
 
-Para probarlo localmente:
+To try it locally:
 
-1. Levanta un backend de prueba:
+1. Start a test backend:
 
    ```sh
    python3 -m http.server 9000
    ```
 
-2. Corre el WAF (escucha en `0.0.0.0:8081`, upstream `http://127.0.0.1:9000`):
+2. Run the WAF (listens on `0.0.0.0:8081`, upstream `http://127.0.0.1:9000`):
 
    ```sh
    cargo run
    ```
 
-3. Verifica que el tráfico pasa intacto:
+3. Verify that traffic passes through untouched:
 
    ```sh
    curl -v http://127.0.0.1:8081/
    ```
 
-Si el upstream no responde, el WAF devuelve `502 Bad Gateway`.
+If the upstream doesn't respond, the WAF returns `502 Bad Gateway`. With `JEV_API_KEY` in the environment, every request gets classified and the verdict is printed to stderr.
 
 ## Tests
 
@@ -62,19 +62,22 @@ Si el upstream no responde, el WAF devuelve `502 Bad Gateway`.
 cargo test
 ```
 
-Los tests de integración (`tests.rs`) levantan un stub upstream en un puerto libre y comprueban:
+The integration tests (`tests.rs`) spin up a stub upstream on a free port and check:
 
-- GET: status, headers y body llegan intactos.
-- POST: el body llega intacto.
-- Upstream caído → `502`.
+- GET: status, headers and body arrive intact.
+- POST: the body arrives intact.
+- Going over the rate limit → `429`.
+- Body larger than 1 MiB → `413`.
+- Upstream down → `502`.
 
-## Estructura
+## Structure
 
 ```
-main.rs    servidor axum en :8081, fallback a proxy::handler
-proxy.rs   handler del proxy: reenvía la petición al upstream y devuelve la respuesta
-jev.rs     cliente Jev (respuestas tipadas): state, preguntas y veredicto detect-only (activa con JEV_API_KEY)
-tests.rs   tests de integración contra un stub upstream
-PLAN.md      plan de diseño (Jev como motor de detección)
-CHECKLIST.md checklist de trabajo por fases
+main.rs    axum server on :8081, fallback to proxy::handler
+proxy.rs   proxy handler: rate limit, buffers the body, asks Jev, forwards to upstream
+rate_limiter.rs  token bucket per IP (governor): 50 rps, 429 when exceeded
+jev.rs     Jev client (typed responses): state, questions and detect-only verdict (enabled with JEV_API_KEY)
+tests.rs   integration tests against a stub upstream
+PLAN.md      design plan (Jev as the detection engine)
+CHECKLIST.md work checklist by phase
 ```

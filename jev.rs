@@ -6,7 +6,6 @@ use serde_json::{Value, json};
 const JEV_URL: &str = "https://jev-api.com/v1/systemone";
 const MODEL: &str = "jev-latest";
 
-/// Mismas preguntas que el playground (QUESTIONS en playground.html)
 pub const QUESTIONS: &str = r#"{
   "attack_type": {
     "type": "choice",
@@ -26,7 +25,6 @@ pub const QUESTIONS: &str = r#"{
   }
 }"#;
 
-/// State del request con la misma forma que stateFor() del playground
 pub fn state(
     method: &str,
     path: &str,
@@ -45,7 +43,6 @@ pub fn state(
     json!({ "method": method, "path": path, "query": query, "headers": h, "body": body })
 }
 
-/// Pregunta a Jev y devuelve la respuesta tipada completa
 pub async fn ask(client: &reqwest::Client, key: &str, st: &Value) -> Result<Value, String> {
     let payload = json!({
         "model": MODEL,
@@ -73,7 +70,6 @@ pub async fn ask(client: &reqwest::Client, key: &str, st: &Value) -> Result<Valu
     Ok(j)
 }
 
-/// Veredicto de una línea para logging detect-only
 pub fn verdict(j: &Value) -> String {
     let a = j.pointer("/answers").unwrap_or(&Value::Null);
     let atk = a

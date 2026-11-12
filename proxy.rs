@@ -30,7 +30,6 @@ pub async fn handler(
         .await
         .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
 
-    // detect-only: veredicto de Jev si hay JEV_API_KEY
     if let Some(key) = std::env::var("JEV_API_KEY").ok() {
         let body_str = String::from_utf8_lossy(&body);
         let path_normalized = normalize(&path);
