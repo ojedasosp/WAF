@@ -1,3 +1,5 @@
+mod detector;
+mod fast_path;
 mod jev;
 mod normalization;
 mod proxy;

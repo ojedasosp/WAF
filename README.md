@@ -10,7 +10,7 @@ client → [Rate limiter] → [Normalizer] → [Rule engine] → [Decision] → 
                                                     403 + audit log
 ```
 
-What the proxy does today: it limits each IP to 50 requests/second (`429`), buffers the body with a 1 MiB cap (`413`) and, if `JEV_API_KEY` is in the environment, asks Jev and logs the verdict (detect-only). The remaining layers get added on top of the same pipeline. See `PLAN.md`.
+What the proxy does today: it limits each IP to 50 requests/second (`429`), buffers the body with a 1 MiB cap (`413`) and, if `JEV_API_KEY` is in the environment, screens each request with a regex fast path (basic SQLi/XSS/LFI) and only asks Jev when something looks suspicious. If Jev rates `threat_level` ≥ 2 the request is blocked with `403` plus an audit log line; otherwise the verdict is just logged. The remaining layers get added on top of the same pipeline. See `PLAN.md`.
 
 ## Current status
 
@@ -21,7 +21,7 @@ What the proxy does today: it limits each IP to 50 requests/second (`429`), buff
 | 2 | Normalization (double-encoding, lowercase, null bytes, `//`, `..\`, SQL comments) | ✅ |
 | 2.5 | Jev client detect-only (`jev.rs`, `playground.html`) | ✅ |
 | 3 | Full inspection via Jev (buffered body, timeout, fail-open) | ✅ |
-| 4 | Decision (`trait Detector`, threshold, 403 + audit log) | ⬜ |
+| 4 | Decision (`trait Detector`, threshold, 403 + audit log) | ◐ |
 | 5 | Rate limiting (token bucket per IP, `429`) and bots (User-Agent, consecutive 404s) | ◐ |
 | 6 | Configuration (`waf.toml`, CLI, `detect-only`/`block`/anomaly score modes) | ⬜ |
 | 7 | Logging and audit (`tracing` JSON, log per block) | ⬜ |
@@ -30,7 +30,7 @@ What the proxy does today: it limits each IP to 50 requests/second (`429`), buff
 
 ## Stack
 
-What I'm using so far: `tokio`, `axum`, `reqwest`, `serde_json`, `percent-encoding` and `governor` for the token bucket per IP. The checklist plans to add `regex`, `toml`, `tracing` and `clap`, plus `criterion` for benchmarks.
+What I'm using so far: `tokio`, `axum`, `reqwest`, `serde_json`, `percent-encoding`, `governor` for the token bucket per IP and `regex` for the fast path. The checklist plans to add `toml`, `tracing` and `clap`, plus `criterion` for benchmarks.
 
 ## Usage
 
@@ -74,7 +74,8 @@ The integration tests (`tests.rs`) spin up a stub upstream on a free port and ch
 
 ```
 main.rs    axum server on :8081, fallback to proxy::handler
-proxy.rs   proxy handler: rate limit, buffers the body, asks Jev, forwards to upstream
+proxy.rs   proxy handler: rate limit, buffers the body, fast-path screen, asks Jev, forwards to upstream
+fast_path.rs  regex fast path: basic SQLi/XSS/LFI patterns, skips Jev on benign traffic
 rate_limiter.rs  token bucket per IP (governor): 50 rps, 429 when exceeded
 jev.rs     Jev client (typed responses): state, questions and detect-only verdict (enabled with JEV_API_KEY)
 tests.rs   integration tests against a stub upstream

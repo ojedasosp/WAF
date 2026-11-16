@@ -8,9 +8,15 @@ use axum::{
 use reqwest::StatusCode;
 use std::net::SocketAddr;
 
-use crate::{jev, normalization::normalize, rate_limiter::Limiter};
+use crate::{
+    detector::{self, Detector},
+    fast_path, jev,
+    normalization::normalize,
+    rate_limiter::Limiter,
+};
 
 const MAX_BODY: usize = 1 << 20; // 1 MiB
+const BLOCK_THRESHOLD: u32 = 2; // threat_level >= 2 → block (tune with the phase-8 corpus)
 
 pub async fn handler(
     State((client, upstream, limiter)): State<(reqwest::Client, String, Limiter)>,
@@ -33,16 +39,36 @@ pub async fn handler(
     if let Some(key) = std::env::var("JEV_API_KEY").ok() {
         let body_str = String::from_utf8_lossy(&body);
         let path_normalized = normalize(&path);
-        let st = jev::state(
-            parts.method.as_str(),
-            &path_normalized,
-            &query,
-            &parts.headers,
-            Some(&body_str),
-        );
-        match jev::ask(&client, &key, &st).await {
-            Ok(j) => eprintln!("[jev] {}", jev::verdict(&j)),
-            Err(e) => eprintln!("[jev] error: {e}"),
+        let haystack = format!("{path_normalized} {query} {body_str}");
+        if let Some(rule) = fast_path::check(&haystack) {
+            let st = jev::state(
+                parts.method.as_str(),
+                &path_normalized,
+                &query,
+                &parts.headers,
+                Some(&body_str),
+            );
+            match jev::ask(&client, &key, &st).await {
+                Ok(j) => match detector::JevDetector.detect(&j, &st) {
+                    Some(m) if m.score >= BLOCK_THRESHOLD => {
+                        eprintln!(
+                            "[audit] block ip={} rule={} location={} score={}",
+                            addr.ip(),
+                            m.rule_id,
+                            m.location,
+                            m.score
+                        );
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                    Some(m) => {
+                        eprintln!("[jev] {rule} {} location={}", jev::verdict(&j), m.location)
+                    }
+                    None => eprintln!("[jev] {rule} benign, regex false positive"),
+                },
+                Err(e) => eprintln!("[jev] error: {e}"),
+            }
+        } else {
+            eprintln!("[fast-path] benign, skipping Jev");
         }
     }
 
