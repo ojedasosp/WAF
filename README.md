@@ -1,6 +1,6 @@
 # webappfirewall
 
-A WAF (Web Application Firewall) in Rust, set up as a transparent reverse proxy. I'm building it for my portfolio/thesis: the goal is to detect SQLi, XSS and path traversal/LFI, and to apply rate limiting and bot detection.
+A WAF (Web Application Firewall) in Rust, set up as a transparent reverse proxy. The goal is to detect SQLi, XSS and path traversal/LFI, and to apply rate limiting and bot detection.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ client → [Rate limiter] → [Normalizer] → [Rule engine] → [Decision] → 
                                                     403 + audit log
 ```
 
-What the proxy does today: it limits each IP to 50 requests/second (`429`), buffers the body with a 1 MiB cap (`413`) and, if `JEV_API_KEY` is in the environment, screens each request with a regex fast path (basic SQLi/XSS/LFI) and only asks Jev when something looks suspicious. If Jev rates `threat_level` ≥ 2 the request is blocked with `403` plus an audit log line; otherwise the verdict is just logged. The remaining layers get added on top of the same pipeline. See `PLAN.md`.
+What the proxy does today: it limits each IP to 50 requests/second (`429`), buffers the body with a 1 MiB cap (`413`) and, if `JEV_API_KEY` is in the environment, screens each request with a regex fast path (basic SQLi/XSS/LFI) and only asks Jev when something looks suspicious. If Jev rates `threat_level` ≥ 2 the request is blocked with `403` plus an audit log line; otherwise the verdict is just logged. The remaining layers get added on top of the same pipeline.
 
 ## Current status
 
@@ -79,6 +79,4 @@ fast_path.rs  regex fast path: basic SQLi/XSS/LFI patterns, skips Jev on benign 
 rate_limiter.rs  token bucket per IP (governor): 50 rps, 429 when exceeded
 jev.rs     Jev client (typed responses): state, questions and detect-only verdict (enabled with JEV_API_KEY)
 tests.rs   integration tests against a stub upstream
-PLAN.md      design plan (Jev as the detection engine)
-CHECKLIST.md work checklist by phase
 ```
