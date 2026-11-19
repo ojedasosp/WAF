@@ -21,7 +21,7 @@ What the proxy does today: it limits each IP to 50 requests/second (`429`), buff
 | 2 | Normalization (double-encoding, lowercase, null bytes, `//`, `..\`, SQL comments) | ✅ |
 | 2.5 | Jev client detect-only (`jev.rs`, `playground.html`) | ✅ |
 | 3 | Full inspection via Jev (buffered body, timeout, fail-open) | ✅ |
-| 4 | Decision (`trait Detector`, threshold, 403 + audit log) | ◐ |
+| 4 | Decision (`trait Detector`, threshold, 403 + simple page + audit log) | ✅ |
 | 5 | Rate limiting (token bucket per IP, `429`) and bots (User-Agent, consecutive 404s) | ◐ |
 | 6 | Configuration (`waf.toml`, CLI, `detect-only`/`block`/anomaly score modes) | ⬜ |
 | 7 | Logging and audit (`tracing` JSON, log per block) | ⬜ |
