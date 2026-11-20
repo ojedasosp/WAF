@@ -1,40 +1,34 @@
-# webappfirewall
+# web application firewall
 
-A WAF (Web Application Firewall) in Rust, set up as a transparent reverse proxy. The goal is to detect SQLi, XSS and path traversal/LFI, and to apply rate limiting and bot detection.
+A web application firewall (WAF) in Rust, built as a transparent reverse proxy. It sits in front of an origin server, screens each request for SQL injection, XSS and path traversal / LFI, and applies per-IP rate limiting.
 
-## Architecture
+## How a request flows
 
 ```
-client → [Rate limiter] → [Normalizer] → [Rule engine] → [Decision] → backend
-                                                          ↓ block
-                                                    403 + audit log
+client → [rate limiter] → [body buffer] → [normalizer + fast-path regex]
+       → [Jev classification (if JEV_API_KEY set)] → [decision] → upstream
+                                                       ↓ block
+                                                 403 + audit line
 ```
 
-What the proxy does today: it limits each IP to 50 requests/second (`429`), buffers the body with a 1 MiB cap (`413`) and, if `JEV_API_KEY` is in the environment, screens each request with a regex fast path (basic SQLi/XSS/LFI) and only asks Jev when something looks suspicious. If Jev rates `threat_level` ≥ 2 the request is blocked with `403` plus an audit log line; otherwise the verdict is just logged. The remaining layers get added on top of the same pipeline.
+1. **Rate limit** — token bucket per IP (`governor`), 50 requests/second. Over the limit → `429`.
+2. **Body buffer** — the body is buffered with a 1 MiB cap before anything else runs. Bigger than that → `413`.
+3. **Fast path** — if `JEV_API_KEY` is in the environment, the path is normalized (repeated percent-decoding up to 10 passes, lowercasing, null bytes and SQL comments stripped, `//` collapsed, `..\` → `../`) and the normalized path + raw query + body are screened against a small set of regexes for basic SQLi, XSS and LFI. Benign traffic skips Jev entirely.
+4. **Jev classification** — only when the fast path flags something, the request state (method, path, query, headers, body) is sent to the Jev API (`jev-latest` model, 10 s timeout). Jev answers typed questions: attack type (`benign`/`sqli`/`xss`/`lfi`), a maliciousness score, and a threat level 0–2.
+5. **Decision** — `threat_level >= 2` blocks the request: one audit line on stderr plus a `403` with a simple HTML page naming the rule that fired (`sqli`=1, `xss`=2, `lfi`=3). Lower scores are logged as detect-only. If Jev errors out, the WAF fails open and forwards the request.
+6. **Forward** — method, path, query, headers and body are passed through to the upstream untouched (redirects are disabled, 300 s upstream timeout). Upstream unreachable → `502`.
 
-## Current status
+## Status codes
 
-| Phase | Description | Status |
-|------|-------------|--------|
-| 0 | Setup (Rust, concepts, test backend) | ✅ |
-| 1 | Transparent proxy (forwards method, path, query, headers and body) | ✅ |
-| 2 | Normalization (double-encoding, lowercase, null bytes, `//`, `..\`, SQL comments) | ✅ |
-| 2.5 | Jev client detect-only (`jev.rs`, `playground.html`) | ✅ |
-| 3 | Full inspection via Jev (buffered body, timeout, fail-open) | ✅ |
-| 4 | Decision (`trait Detector`, threshold, 403 + simple page + audit log) | ✅ |
-| 5 | Rate limiting (token bucket per IP, `429`) and bots (User-Agent, consecutive 404s) | ◐ |
-| 6 | Configuration (`waf.toml`, CLI, `detect-only`/`block`/anomaly score modes) | ⬜ |
-| 7 | Logging and audit (`tracing` JSON, log per block) | ⬜ |
-| 8 | Evaluation (payload corpus, detection %, false positives, benchmark) | ⬜ |
-| 9 | Demo and documentation (docker-compose, local sqlmap/nikto, integration tests) | ⬜ |
+| Code | When |
+|------|------|
+| `429` | IP over the 50 req/s rate limit |
+| `413` | Body larger than 1 MiB |
+| `403` | Jev threat level ≥ 2 (simple block page + audit line) |
+| `502` | Upstream down or unreachable |
+| `200`/upstream status | Everything else, forwarded as-is |
 
-## Stack
-
-What I'm using so far: `tokio`, `axum`, `reqwest`, `serde_json`, `percent-encoding`, `governor` for the token bucket per IP and `regex` for the fast path. The checklist plans to add `toml`, `tracing` and `clap`, plus `criterion` for benchmarks.
-
-## Usage
-
-To try it locally:
+## Running it
 
 1. Start a test backend:
 
@@ -48,13 +42,21 @@ To try it locally:
    cargo run
    ```
 
-3. Verify that traffic passes through untouched:
+3. Verify traffic passes through untouched:
 
    ```sh
    curl -v http://127.0.0.1:8081/
    ```
 
-If the upstream doesn't respond, the WAF returns `502 Bad Gateway`. With `JEV_API_KEY` in the environment, every request gets classified and the verdict is printed to stderr.
+4. Optionally set `JEV_API_KEY` to enable detection:
+
+   ```sh
+   JEV_API_KEY=jev_test_... cargo run
+   ```
+
+   With the key set, every fast-path hit is classified by Jev and the verdict is printed to stderr; blocks print an `[audit]` line.
+
+`playground.html` is a manual test page (served at `http://127.0.0.1:8081/playground.html`) that runs sample requests through the WAF and can ask Jev about the last one.
 
 ## Tests
 
@@ -62,21 +64,24 @@ If the upstream doesn't respond, the WAF returns `502 Bad Gateway`. With `JEV_AP
 cargo test
 ```
 
-The integration tests (`tests.rs`) spin up a stub upstream on a free port and check:
+- Unit tests per module: normalization (double-encoding, case, comments, null bytes, `//`, `..\`), fast-path regexes (SQLi/XSS/LFI + benign), Jev answer mapping, rate limiter quota.
+- Integration tests (`tests.rs`) spin up a stub upstream on a free port and check: GET status/headers/body arrive intact, POST body arrives intact, over the rate limit → `429`, body > 1 MiB → `413`, upstream down → `502`.
+- `proxy.rs` has a unit test for the block path: `403` with the rule ID in the page body.
 
-- GET: status, headers and body arrive intact.
-- POST: the body arrives intact.
-- Going over the rate limit → `429`.
-- Body larger than 1 MiB → `413`.
-- Upstream down → `502`.
-
-## Structure
+## Files
 
 ```
-main.rs    axum server on :8081, fallback to proxy::handler
-proxy.rs   proxy handler: rate limit, buffers the body, fast-path screen, asks Jev, forwards to upstream
-fast_path.rs  regex fast path: basic SQLi/XSS/LFI patterns, skips Jev on benign traffic
-rate_limiter.rs  token bucket per IP (governor): 50 rps, 429 when exceeded
-jev.rs     Jev client (typed responses): state, questions and detect-only verdict (enabled with JEV_API_KEY)
-tests.rs   integration tests against a stub upstream
+main.rs          axum server on 0.0.0.0:8081, fallback to proxy::handler
+proxy.rs         handler: rate limit, body buffer, fast path, Jev, decision, forward; blocked() = 403 + page + audit line
+fast_path.rs     regex fast path: basic SQLi/XSS/LFI patterns
+normalization.rs path normalization (percent-decode, lowercase, null bytes, comments, //, ..\)
+jev.rs           Jev client: state builder, typed questions, verdict formatting
+detector.rs      Detector trait + JevDetector: maps Jev answers to a Match (rule_id, score, location)
+rate_limiter.rs  token bucket per IP (governor): 50 rps
+tests.rs         integration tests against a stub upstream
+playground.html  manual test page
 ```
+
+## Stack
+
+`tokio`, `axum`, `reqwest`, `serde_json`, `percent-encoding`, `governor` (token bucket), `regex` (fast path).
