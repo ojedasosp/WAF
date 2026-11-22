@@ -3,28 +3,6 @@ use std::time::Duration;
 use axum::http::HeaderMap;
 use serde_json::{Value, json};
 
-const JEV_URL: &str = "https://jev-api.com/v1/systemone";
-const MODEL: &str = "jev-latest";
-
-pub const QUESTIONS: &str = r#"{
-  "attack_type": {
-    "type": "choice",
-    "instructions": "Classify this HTTP request.",
-    "criteria": {
-      "benign": "Normal web traffic, nothing suspicious",
-      "sqli": "SQL injection attempt",
-      "xss": "Cross-site scripting attempt",
-      "lfi": "Path traversal / local file inclusion attempt"
-    }
-  },
-  "is_malicious": { "type": "noul", "instructions": "Is this request malicious?" },
-  "threat_level": {
-    "type": "score",
-    "instructions": "How likely is this a real attack?",
-    "criteria": ["Benign or accidental", "Suspicious, likely probing", "Clear intentional attack"]
-  }
-}"#;
-
 pub fn state(
     method: &str,
     path: &str,
@@ -43,14 +21,21 @@ pub fn state(
     json!({ "method": method, "path": path, "query": query, "headers": h, "body": body })
 }
 
-pub async fn ask(client: &reqwest::Client, key: &str, st: &Value) -> Result<Value, String> {
+pub async fn ask(
+    client: &reqwest::Client,
+    key: &str,
+    st: &Value,
+    url: &str,
+    model: &str,
+    questions: &str,
+) -> Result<Value, String> {
     let payload = json!({
-        "model": MODEL,
+        "model": model,
         "state": st.to_string(),
-        "questions": serde_json::from_str::<Value>(QUESTIONS).unwrap(),
+        "questions": serde_json::from_str::<Value>(questions).unwrap(),
     });
     let res = client
-        .post(JEV_URL)
+        .post(url)
         .header("Authorization", format!("Bearer {key}"))
         .json(&payload)
         .timeout(Duration::from_secs(10))

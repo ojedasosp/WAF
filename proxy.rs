@@ -13,13 +13,11 @@ use crate::{
     fast_path, jev,
     normalization::normalize,
     rate_limiter::Limiter,
+    Config,
 };
 
-const MAX_BODY: usize = 1 << 20; // 1 MiB
-const BLOCK_THRESHOLD: u32 = 2; // threat_level >= 2 → block (tune with the phase-8 corpus)
-
 pub async fn handler(
-    State((client, upstream, limiter)): State<(reqwest::Client, String, Limiter)>,
+    State((client, limiter, cfg)): State<(reqwest::Client, Limiter, Config)>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     rq: Request,
 ) -> Result<Response, StatusCode> {
@@ -32,7 +30,8 @@ pub async fn handler(
 
     let (parts, body) = rq.into_parts();
 
-    let body = to_bytes(body, MAX_BODY)
+    let max_body = cfg.max_body as usize * (1 << 20); // config value is MiB
+    let body = to_bytes(body, max_body)
         .await
         .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
 
@@ -48,9 +47,9 @@ pub async fn handler(
                 &parts.headers,
                 Some(&body_str),
             );
-            match jev::ask(&client, &key, &st).await {
+            match jev::ask(&client, &key, &st, &cfg.jev_url, &cfg.model, &cfg.questions).await {
                 Ok(j) => match detector::JevDetector.detect(&j, &st) {
-                    Some(m) if m.score >= BLOCK_THRESHOLD => {
+                    Some(m) if m.score >= cfg.block_threshold as u32 => {
                         return Ok(blocked(addr.ip(), &m));
                     }
                     Some(m) => {
@@ -66,7 +65,7 @@ pub async fn handler(
     }
 
     let res = client
-        .request(parts.method, format!("{upstream}{path}{query}"))
+        .request(parts.method, format!("{}{path}{query}", cfg.upstream))
         .headers(parts.headers)
         .body(body)
         .timeout(Duration::from_secs(300))

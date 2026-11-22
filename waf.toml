@@ -1,0 +1,26 @@
+[config]
+upstream="http://127.0.0.1:9000"
+port=8181
+jev_url="https://jev-api.com/v1/systemone"
+model="jev-latest"
+questions="""{
+  "attack_type": {
+    "type": "choice",
+    "instructions": "Classify this HTTP request.",
+    "criteria": {
+      "benign": "Normal web traffic, nothing suspicious",
+      "sqli": "SQL injection attempt",
+      "xss": "Cross-site scripting attempt",
+      "lfi": "Path traversal / local file inclusion attempt"
+    }
+  },
+  "is_malicious": { "type": "noul", "instructions": "Is this request malicious?" },
+  "threat_level": {
+    "type": "score",
+    "instructions": "How likely is this a real attack?",
+    "criteria": ["Benign or accidental", "Suspicious, likely probing", "Clear intentional attack"]
+  }
+}"""
+quota=50
+max_body=1
+block_threshold=2

@@ -1,4 +1,4 @@
-use super::{proxy::handler, rate_limiter::Limiter};
+use super::{proxy::handler, rate_limiter::Limiter, Config};
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -10,6 +10,20 @@ use std::net::SocketAddr;
 
 fn peer() -> ConnectInfo<SocketAddr> {
     ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345)))
+}
+
+// Config as in waf.toml; Jev fields are dummies (no JEV_API_KEY in tests).
+fn cfg(upstream: &str) -> Config {
+    Config {
+        upstream: upstream.to_string(),
+        port: 8181,
+        jev_url: "https://jev-api.com/v1/systemone".into(),
+        model: "jev-latest".into(),
+        questions: "{}".into(),
+        quota: 50,
+        max_body: 1,
+        block_threshold: 2,
+    }
 }
 
 // Stub upstream: one route with a fixed body + header, one that echoes the body.
@@ -46,7 +60,7 @@ async fn forwards_get_status_headers_and_body() {
     let upstream = start_stub_upstream().await;
     let client = reqwest::Client::new();
     let res = handler(
-        State((client, upstream, Limiter::new())),
+        State((client, Limiter::new(50), cfg(&upstream))),
         peer(),
         request(axum::http::Method::GET, "/hello", vec![]),
     )
@@ -66,7 +80,7 @@ async fn forwards_post_body() {
     let upstream = start_stub_upstream().await;
     let client = reqwest::Client::new();
     let res = handler(
-        State((client, upstream, Limiter::new())),
+        State((client, Limiter::new(50), cfg(&upstream))),
         peer(),
         request(axum::http::Method::POST, "/echo", b"hello world".to_vec()),
     )
@@ -80,10 +94,10 @@ async fn forwards_post_body() {
 async fn rate_limited_gives_429() {
     let upstream = start_stub_upstream().await;
     let client = reqwest::Client::new();
-    let limiter = Limiter::new();
+    let limiter = Limiter::new(50);
     for _ in 0..50 {
         handler(
-            State((client.clone(), upstream.clone(), limiter.clone())),
+            State((client.clone(), limiter.clone(), cfg(&upstream))),
             peer(),
             request(axum::http::Method::GET, "/hello", vec![]),
         )
@@ -91,7 +105,7 @@ async fn rate_limited_gives_429() {
         .unwrap();
     }
     let res = handler(
-        State((client, upstream, limiter)),
+        State((client, limiter, cfg(&upstream))),
         peer(),
         request(axum::http::Method::GET, "/hello", vec![]),
     )
@@ -104,7 +118,7 @@ async fn oversized_body_gives_413() {
     let upstream = start_stub_upstream().await;
     let client = reqwest::Client::new();
     let res = handler(
-        State((client, upstream, Limiter::new())),
+        State((client, Limiter::new(50), cfg(&upstream))),
         peer(),
         request(axum::http::Method::POST, "/echo", vec![b'a'; (1 << 20) + 1]),
     )
@@ -116,7 +130,7 @@ async fn oversized_body_gives_413() {
 async fn upstream_down_gives_502() {
     let client = reqwest::Client::new();
     let res = handler(
-        State((client, "http://127.0.0.1:1".to_string(), Limiter::new())),
+        State((client, Limiter::new(50), cfg("http://127.0.0.1:1"))),
         peer(),
         request(axum::http::Method::GET, "/hello", vec![]),
     )

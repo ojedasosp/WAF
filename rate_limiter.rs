@@ -1,5 +1,5 @@
+use core::num::NonZeroU32;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter, middleware::NoOpMiddleware};
-use nonzero_macros::nonzero;
 use std::{net::IpAddr, sync::Arc};
 
 type Key = IpAddr;
@@ -10,9 +10,11 @@ pub struct Limiter {
 }
 
 impl Limiter {
-    pub fn new() -> Limiter {
+    pub fn new(quota: u32) -> Limiter {
         Limiter {
-            inner: Arc::new(RateLimiter::keyed(Quota::per_second(nonzero!(50u32)))),
+            inner: Arc::new(RateLimiter::keyed(Quota::per_second(
+                NonZeroU32::new(quota).expect("quota must be > 0"),
+            ))),
         }
     }
 
@@ -27,7 +29,7 @@ mod tests {
 
     #[test]
     fn allows_until_quota_then_denies() {
-        let lim = Limiter::new();
+        let lim = Limiter::new(50);
         let ip = "1.2.3.4".parse::<IpAddr>().unwrap();
         for _ in 0..50 {
             assert!(lim.check(ip));
